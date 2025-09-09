@@ -1,1 +1,100 @@
+#!/bin/bash
 
+#SBATCH --job-name=Compare_Helixer_Fun_STAR2     # Job name
+#SBATCH --cpus-per-task=10
+#SBATCH --mem=40G
+#SBATCH --output=reports/%j-%x.out
+
+set -euo pipefail
+
+# ------------------ Conda ------------------
+echo "==> Activating conda environment"
+eval "$(conda shell.bash hook)"
+conda activate RNAseq_STAR
+
+# ------------------ Paths ------------------
+fastq_dir="data/raw_data/T_gamsii_public_reads"
+genome="data/genomes/ragtag_scaffoldv3_atro.fasta"
+gff3_helixer="data/annotations/T35v3_helixer.gff"
+gtf_helixer="data/annotations/T35v3_helixer.gtf"
+output_h="data/processed_data/Compare_anno_T35"
+
+mkdir -p "$output_h/alignment" "$output_h/genome_index" "$output_h/logs"
+
+PE=FALSE        # TRUE if paired-end
+STAR_RAM=16000000000  # ~16 GB
+
+# ------------------ GFF3 → GTF ------------------
+if [ ! -f "$gtf_helixer" ]; then
+    echo "Converting GFF3 to GTF..."
+    gffread "$gff3_helixer" -T -o "$gtf_helixer"
+fi
+
+# ------------------ Genome Index ------------------
+if [ ! -f "$output_h/genome_index/SAindex" ]; then
+    echo "Building STAR genome index..."
+    STAR --runThreadN $SLURM_CPUS_PER_TASK \
+         --runMode genomeGenerate \
+         --genomeDir "$output_h/genome_index" \
+         --genomeFastaFiles "$genome" \
+         --sjdbGTFfile "$gtf_helixer" \
+         --sjdbOverhang 149
+fi
+
+# ------------------ Alignments ------------------
+for fq in "$fastq_dir"/*_1.fastq.gz; do
+    base=$(basename "$fq" _1.fastq.gz)
+    fq1="$fastq_dir/${base}_1.fastq.gz"
+    fq2="$fastq_dir/${base}_2.fastq.gz"
+    output_bam="$output_h/alignment/${base}_Aligned.sortedByCoord.out.bam"
+
+    if [ -f "$fq2" ]; then
+        [ ! -s "$output_bam" ] && echo "Aligning paired-end: $base" && \
+        STAR --runThreadN $SLURM_CPUS_PER_TASK \
+             --genomeDir "$output_h/genome_index" \
+             --readFilesIn "$fq1" "$fq2" \
+             --readFilesCommand zcat \
+             --twopassMode Basic \
+             --outSAMtype BAM SortedByCoordinate \
+             --quantMode GeneCounts \
+             --limitBAMsortRAM $STAR_RAM \
+             --outFileNamePrefix "$output_h/alignment/${base}."
+    fi
+done
+
+# Single-end reads
+for fq in "$fastq_dir"/*.fastq.gz; do
+    base=$(basename "$fq" .fastq.gz)
+    output_bam="$output_h/alignment/${base}_Aligned.sortedByCoord.out.bam"
+
+    if [[ ! -f "$fastq_dir/${base}_2.fastq.gz" && ! "$base" =~ _1$ ]]; then
+        [ ! -s "$output_bam" ] && echo "Aligning single-end: $base" && \
+        STAR --runThreadN $SLURM_CPUS_PER_TASK \
+             --genomeDir "$output_h/genome_index" \
+             --readFilesIn "$fq" \
+             --readFilesCommand zcat \
+             --twopassMode Basic \
+             --outSAMtype BAM SortedByCoordinate \
+             --quantMode GeneCounts \
+             --limitBAMsortRAM $STAR_RAM \
+             --outFileNamePrefix "$output_h/alignment/${base}."
+    fi
+done
+
+# ------------------ Merge GeneCounts ------------------
+echo "Merging GeneCounts..."
+merged_counts="$output_h/alignment/counts_matrix.tsv"
+first_file=$(ls $output_h/alignment/*ReadsPerGene.out.tab | head -n 1)
+cut -f1 "$first_file" > "$output_h/alignment/tmp_gene_ids.txt"
+cp "$output_h/alignment/tmp_gene_ids.txt" "$merged_counts"
+
+for file in $output_h/alignment/*ReadsPerGene.out.tab; do
+    sample=$(basename "$file" .ReadsPerGene.out.tab)
+    paste "$merged_counts" <(cut -f2 "$file") > "$output_h/alignment/tmp_merge.tsv"
+    mv "$output_h/alignment/tmp_merge.tsv" "$merged_counts"
+    sed -i "1i GeneID\t$sample" "$merged_counts"
+done
+rm "$output_h/alignment/tmp_gene_ids.txt"
+
+echo "✅ All done. Results in $output_h/alignment"
+conda deactivate
