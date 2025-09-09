@@ -1,0 +1,73 @@
+#!/bin/bash
+
+###############################################################################
+# SLURM job submission script: RagTag scaffolding for T. gamsii
+###############################################################################
+
+# SLURM options
+#SBATCH --job-name=Ragtag_T_gamsii
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=64G
+#SBATCH --output=reports/%j-%x.out
+
+###############################################################################
+# Conda environment setup
+###############################################################################
+eval "$(conda shell.bash hook)"
+source /path/to/miniconda3/etc/profile.d/conda.sh
+
+set -euo pipefail
+
+###############################################################################
+# Paths
+###############################################################################
+WORKDIR="/path/to/workdir/T_gamsii/Ragtag_w_T_atroviride"
+ASSEMBLED_GENOME_T_GAMSII="/path/to/assembly/racon3.fasta"
+REFERENCE_GENOME_T_ATROVIRIDE="/path/to/reference/T_atroviride_genome.fna"
+
+mkdir -p "$WORKDIR"
+cd "$WORKDIR"
+
+###############################################################################
+# RagTag scaffolding
+###############################################################################
+conda activate ragtag_env
+
+echo "Running RagTag scaffolding..."
+ragtag.py scaffold \
+    "$REFERENCE_GENOME_T_ATROVIRIDE" \
+    "$ASSEMBLED_GENOME_T_GAMSII" \
+    -o ragtag_scaffolding \
+    -t $SLURM_CPUS_PER_TASK
+
+conda deactivate
+
+###############################################################################
+# Assembly evaluation: QUAST and BUSCO
+###############################################################################
+conda activate genome_assembly_env
+
+echo "Running QUAST..."
+quast.py \
+    "$ASSEMBLED_GENOME_T_GAMSII" \
+    ragtag_scaffolding/ragtag.scaffold.fasta \
+    -o quast_ragtag \
+    -t $SLURM_CPUS_PER_TASK \
+    --large
+
+echo "Running BUSCO..."
+busco -i ragtag_scaffolding/ragtag.scaffold.fasta \
+      -l fungi_odb10 \
+      -o busco_ragtag \
+      -m genome \
+      -c $SLURM_CPUS_PER_TASK
+
+conda deactivate
+
+###############################################################################
+# Job summary
+###############################################################################
+echo "SLURM job ID: $SLURM_JOB_ID"
+sacct -j "$SLURM_JOB_ID" --format=JobID,JobName,Elapsed,TotalCPU,MaxRSS
+
+echo "Job completed successfully."

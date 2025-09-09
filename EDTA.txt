@@ -1,0 +1,60 @@
+#!/bin/bash
+
+###############################################################################
+# SLURM job submission script: EDTA repeat annotation for T. gamsii
+###############################################################################
+
+# SLURM options
+#SBATCH --job-name=EDTA_T_gamsii
+#SBATCH --cpus-per-task=10
+#SBATCH --mem=50G
+#SBATCH --output=reports/%j-%x.out
+##SBATCH --mail-user=your.email@domain
+##SBATCH --mail-type=ALL
+
+###############################################################################
+# Conda environment setup
+###############################################################################
+eval "$(conda shell.bash hook)"
+source /path/to/miniconda3/etc/profile.d/conda.sh
+conda activate edta_env
+
+# Optional: verify Java version in logs
+java -version
+
+# Fail on errors or undefined variables
+set -euo pipefail
+
+###############################################################################
+# Variables
+###############################################################################
+WORKDIR="/path/to/workdir/EDTA/T_gamsii_v6"
+GENOME="/path/to/genome/ragtag_scaffold.fasta"
+THREADS=${SLURM_CPUS_PER_TASK:-10}
+
+mkdir -p "$WORKDIR"
+cd "$WORKDIR"
+
+###############################################################################
+# Run EDTA (all steps, skip Helitron)
+###############################################################################
+EDTA.pl \
+  --genome "$GENOME" \
+  --species others \
+  --step all \
+  --anno 1 \
+  --threads "$THREADS" \
+  --sensitive 1 \
+  --evaluate 1 \
+  --overwrite 0 \
+  --force 1
+
+conda deactivate
+
+###############################################################################
+# Job summary
+###############################################################################
+echo "SLURM job ID: $SLURM_JOB_ID"
+sacct -j "$SLURM_JOB_ID" --format=JobID,JobName,Elapsed,TotalCPU,MaxRSS --units=G
+
+echo "Job completed successfully."
