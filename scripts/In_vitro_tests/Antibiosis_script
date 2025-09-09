@@ -1,0 +1,39 @@
+#############################################
+# 📦 Libraries
+#############################################
+library(ggplot2)
+library(dplyr)
+library(agricolae)
+
+#############################################
+# 📊 Visualization: Boxplot with points
+#############################################
+ggplot(test, aes(x = trait, y = aire, fill = trait)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.6) +
+  geom_jitter(aes(color = trait), width = 0.2, size = 2, alpha = 0.8) +
+  facet_grid(. ~ patho) +
+  scale_fill_manual(values = c("Control" = "grey", "T035" = "#00BFC4", "I1237" = "#F8766D")) +
+  scale_color_manual(values = c("Control" = "grey", "T035" = "#00BFC4", "I1237" = "#F8766D")) +
+  scale_x_discrete(limits = c("Control", "I1237", "T035")) +
+  theme_bw() +
+  labs(y = "Area under growth curve (AU)") +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  )
+
+#############################################
+# 🔎 Statistical analysis (patho = Xanthomonas campestris)
+#############################################
+testa <- subset(test, patho == "Xanthomonas campestris")
+
+# Checking ANOVA assumptions
+bartlett.test(aire ~ trait, data = testa)     # Homogeneity of variances
+shapiro.test(testa$aire)                      # Normality of data
+
+# ANOVA + post-hoc (Student-Newman-Keuls)
+analyse  <- aov(aire ~ trait, data = testa)
+summary(analyse)
+
+analyse2 <- SNK.test(analyse, "trait", alpha = 0.05)
+print(analyse2)
