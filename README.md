@@ -6,7 +6,7 @@ Pipeline to assemble and annotate the genome of *Trichoderma gamsii* strain T035
 
 ## Overview
 
-This repository contains all data, scripts, and results used in the assembly, annotation, and validation of the T035 genome. It also includes data and scripts used to evaluate the biocontrol capacity of T. gamsii T035 and perform comparative genomics.
+This repository contains all data, scripts, and results used in the assembly, annotation, and validation of the T035 genome. It also includes data and scripts used to evaluate the biocontrol capacity of *T. gamsii* T035 and perform comparative genomics.
 
 ---
 
@@ -64,7 +64,7 @@ Scripts are designed for SLURM-based clusters with Conda environments.
 
 ## Genome Data Availability
 
-- **BioProject:** PRJNA1327094 (Trichoderma gamsii strain T035 genome sequencing)  
+- **BioProject:** PRJNA1327094 (*Trichoderma gamsii* strain T035 genome sequencing)  
 - **BioSample:** SAMN51264459  
 - **SRA:** SRR35336635  
 - **TaxID:** 398673  
@@ -73,7 +73,7 @@ Scripts are designed for SLURM-based clusters with Conda environments.
 
 ## Citation
 
-If you use this dataset or pipeline, please cite: Draft genome of Trichoderma gamsii strain T035 a promising beneficial fungus in agriculture (https://doi.org/10.1101/2025.09.22.677720).
+If you use this dataset or pipeline, please cite: Draft genome of *Trichoderma gamsii* strain T035 a promising beneficial fungus in agriculture (https://doi.org/10.1101/2025.09.22.677720).
 
 ---
 
