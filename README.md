@@ -28,6 +28,10 @@ Contains supplementary figures and genome annotations.
 - "Supplementary_Figure_S1.png": Scale used to evaluate *T. gamsii* overgrowth on several plant pathogens (Figure 4A).
 - "T_gamsii_T035.gff": Structural genome annotation obtained with Helixer.
 - "T_gamsii_T035_anno.gff": Structural annotation supplemented with functional annotation from Eggnog.
+- "S2_linear_plot.png": Linear k-mer frequency plot generated with GenomeScope, showing the number of k-mers (y-axis) versus k-mer coverage (x-axis).
+- "S3_log_plot.png": Logarithmic version of the k-mer frequency plot.
+- "S4_transformed_linear_plot.png": Linear plot of transformed k-mer frequencies to highlight repetitive content.
+- "S5_transformed_log_plot.png": Logarithmic version of the transformed k-mer plot.
 
 ---
 
@@ -50,6 +54,9 @@ All scripts used in the study, organized by analysis type.
 
 #### Mash_comparison/
 - "MashTree": SLURM script to generate the Newick tree for Figure 2. Genomes used are listed in "Strains_for_MashTree.xlsx".
+
+#### Quality/
+- "k-mer_analysis": SLURM script to generate the k-mer histogram. This histogram was later used to obtain the spectra plots to evaluate the genome quality with GenoScope (see "S2_linear_plot.png", "S3_log_plot.png", "S4_transformed_linear_plot.png", "S5_transformed_log_plot.png"). All results can be observed at the following link: http://genomescope.org/genomescope2.0/analysis.php?code=S5DhLvgnW5NZNsCLj1KN
 
 #### Validation_with_STAR/
 - "STAR": SLURM script to validate the structural genome annotation ("T_gamsii_T035.gff") using public transcriptomic data ("List_of_transcriptomic_data.xlsx").
