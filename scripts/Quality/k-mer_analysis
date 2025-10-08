@@ -1,0 +1,112 @@
+#!/bin/bash
+
+###############################################################################
+#####                            Slurm options                           ######
+###############################################################################
+
+### Job name
+#SBATCH --job-name=k-mer_analysis_T_gamsii         # Job name
+
+### Requirements
+#SBATCH --cpus-per-task=10             # Number of cores
+#SBATCH --mem=100G                     # Memory needed
+
+### Email
+##SBATCH --mail-user=justine.colou@univ-angers.fr
+##SBATCH --mail-type=ALL
+
+### Output
+#SBATCH --output=/home/genouest/inra_umr1345/jucolou/Genomic/Reports/%j-%x.out
+
+###############################################################################
+# Ensure conda is initialized and activate the environment
+eval "$(conda shell.bash hook)"
+conda init bash
+
+# Sourcing conda pour rendre la commande disponible dans le script
+source /local/miniconda3/etc/profile.d/conda.sh
+
+# Activer l’environnement conda
+conda activate genome_assembly_env
+
+set -euo pipefail
+
+
+# === Paths ===
+WORKDIR="/scratch/jucolou/Genomic/T_gamsii/kmer/jellyfish"
+READS="/scratch/jucolou/Genomic/T_gamsii/long_reads_clean.fastq"
+ASSEMBLY="/scratch/jucolou/Genomic/T_gamsii/Ragtag_w_T_atroviride/ragtag_scaffolding/ragtag.scaffold.fasta"
+CORRECTED_GZ="$WORKDIR/canu_corrected/T_gamsii.correctedReads.fasta.gz"
+CORRECTED_FA="$WORKDIR/canu_corrected/T_gamsii.correctedReads.fasta"
+JELLY_OUT="$WORKDIR/jellyfish_counts"
+
+GENOMESCOPE_OUT="$WORKDIR/genomescope2_output"
+mkdir -p "$WORKDIR"
+mkdir -p "$WORKDIR/canu_corrected"
+mkdir -p "$WORKDIR/jellyfish_counts"
+mkdir -p "$GENOMESCOPE_OUT"
+
+cd $WORKDIR
+
+###############################################################################
+# Step 1: Canu correction
+###############################################################################
+echo "Starting Canu correction..."
+canu -correct \
+     -p T_gamsii \
+     -d "$WORKDIR/canu_corrected" \
+     genomeSize=31m \
+     -nanopore-raw "$READS" \
+     useGrid=false \
+     maxThreads=10 \
+     maxMemory=50
+
+
+
+###############################################################################
+#####              Step 2: Prepare input for Jellyfish                     #####
+###############################################################################
+
+if [ ! -f "$CORRECTED_FA" ]; then
+    echo "Decompressing corrected reads..."
+    gunzip -c "$CORRECTED_GZ" > "$CORRECTED_FA"
+else
+    echo "⏩ Corrected reads already decompressed."
+fi
+
+###############################################################################
+#####                  Step 3: Jellyfish k-mer counting                    #####
+###############################################################################
+
+echo "=== Counting k-mers with Jellyfish ==="
+if [ ! -f "$JELLY_OUT/T_gamsii_k21.jf" ]; then
+    jellyfish count -C -m 21 -s 15G -t 10 -o "$JELLY_OUT/T_gamsii_k21.jf" "$CORRECTED_FA"
+    echo "✅ Jellyfish k-mer counting completed."
+else
+    echo "⏩ Skipping Jellyfish count (already done)."
+fi
+
+echo "=== Generating k-mer histogram ==="
+if [ ! -f "$JELLY_OUT/T_gamsii_k21.histo" ]; then
+    jellyfish histo -t 10 "$JELLY_OUT/T_gamsii_k21.jf" > "$JELLY_OUT/T_gamsii_k21.histo"
+    echo "✅ Histogram generated."
+else
+    echo "⏩ Skipping histogram (already exists)."
+fi
+
+###############################################################################
+#####                    Step 4: GenomeScope2 analysis                     #####
+###############################################################################
+
+echo "=== GenomeScope2 ==="
+echo "Upload the file below to http://genomescope.org/genomescope2.0/"
+echo "File: $JELLY_OUT/T_gamsii_k21.histo"
+
+
+###############################################################################
+#####                         Step 5: Job summary                          #####
+###############################################################################
+
+echo "=== Job summary (sacct) ==="
+sacct -j $SLURM_JOB_ID --format=JobID,JobName%30,Elapsed,State,MaxRSS,AllocCPUs
+echo "=== Done! ==="
