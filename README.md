@@ -32,6 +32,8 @@ Contains supplementary figures and genome annotations.
 - "S3_log_plot.png": Logarithmic version of the k-mer frequency plot.
 - "S4_transformed_linear_plot.png": Linear plot of transformed k-mer frequencies to highlight repetitive content.
 - "S5_transformed_log_plot.png": Logarithmic version of the transformed k-mer plot.
+- "S6_Synteny between T035-T6085&A5MH.png": Supplementary Figure S6: Synteny analysis of the main published T. gamsii genomes reveals the highly fragmented assemblies of strains T6085 and A5MH compared with T035.
+
 
 ---
 
