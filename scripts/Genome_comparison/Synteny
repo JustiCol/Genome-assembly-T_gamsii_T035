@@ -1,0 +1,120 @@
+
+# ==============================================================================
+#  Comparative genomics pipeline using JCVI (McClure et al., 2012)
+#  Performs ortholog detection, synteny screening, and karyotype visualization.
+# ==============================================================================
+
+# --- Configuration & Paths ---
+GENOME_DIR=""
+WORK_DIR=""
+GENOMES=("T6085" "T035" "A5MH")
+
+# Visualization Parameters
+COLORS=("#9467bd" "#2ca02c" "#d62728") # Custom HEX colors for plot
+
+mkdir -p "$WORK_DIR"
+cd "$WORK_DIR"
+
+# ==============================================================================
+# STEP 1: Data Pre-processing & Normalization
+# ==============================================================================
+# JCVI requires matching IDs between the .bed file (4th column) and the 
+# .pep (Fasta) headers.
+# ==============================================================================
+
+echo "[Step 1] Preparing Genomic Files..."
+
+for GENOME in "${GENOMES[@]}"; do
+    echo "Processing genome: $GENOME"
+    GFF="$GENOME_DIR/${GENOME}.gff"
+
+    # 1. BED Generation: Differentiate based on annotation source
+    if [[ "$GENOME" == "T035" ]]; then
+        # Helixer annotations: Extract mRNA IDs
+        python -m jcvi.formats.gff bed --type=mRNA "$GFF" -o "${GENOME}.bed"
+    else
+        # NCBI/Standard annotations: Extract protein_id from CDS features
+        python -m jcvi.formats.gff bed --type=CDS --key=protein_id "$GFF" -o "${GENOME}.bed"
+    fi
+
+    # 2. ID Normalization (BED)
+    # Removes suffix (e.g., .1) to match standardized protein IDs
+    awk 'BEGIN{OFS="\t"} { $4 = substr($4,1,length($4)-2); print }' \
+        "${GENOME}.bed" > "${GENOME}.bed.tmp" && mv "${GENOME}.bed.tmp" "${GENOME}.bed"
+
+    # 3. Protein Linkage & Header Normalization (FASTA)
+    if [ -f "$GENOME_DIR/${GENOME}.faa" ]; then
+        cp "$GENOME_DIR/${GENOME}.faa" "${GENOME}.pep"
+    elif [ -f "$GENOME_DIR/${GENOME}.fa" ]; then
+        cp "$GENOME_DIR/${GENOME}.fa" "${GENOME}.pep"
+    fi
+
+    # Clean Fasta headers: Remove everything after the first dot to match BED
+    sed -E 's/^>([^ ]+)\.[0-9]+/>\1/' "${GENOME}.pep" > "${GENOME}.pep.tmp" \
+        && mv "${GENOME}.pep.tmp" "${GENOME}.pep"
+
+    # 4. QC: Check ID consistency
+    NB_MATCH=$(comm -12 \
+        <(cut -f4 ${GENOME}.bed | sort -u) \
+        <(grep '^>' ${GENOME}.pep | tr -d '>' | cut -d' ' -f1 | sort -u) \
+        | wc -l)
+    echo "   -> Validation: $NB_MATCH matching IDs found between BED and PEP"
+done
+
+# ==============================================================================
+# STEP 2: Orthology Detection (LAST/BLAST)
+# ==============================================================================
+
+echo "[Step 2] Calculating Orthologs..."
+
+for i in "${!GENOMES[@]}"; do
+    for j in "${!GENOMES[@]}"; do
+        if [ $i -lt $j ]; then
+            G1=${GENOMES[$i]}
+            G2=${GENOMES[$j]}
+            echo "   Comparing $G1 vs $G2..."
+            # --dbtype=prot ensures JCVI treats inputs as protein sequences
+            python -m jcvi.compara.catalog ortholog $G1 $G2 --align_soft=blast --dbtype=prot
+        fi
+    done
+done
+
+# ==============================================================================
+# STEP 3: Synteny Block Screening
+# ==============================================================================
+
+echo "[Step 3] Screening Synteny Blocks..."
+
+for f in *.anchors; do
+    # --minspan: minimum number of genes to define a synteny block
+    # --simple: simplifies the output for cleaner visualization
+    python -m jcvi.compara.synteny screen $f ${f%.anchors}.cleaned --minspan=30 --simple
+done
+
+# ==============================================================================
+# STEP 4: Visualization (Karyotype Plot)
+# ==============================================================================
+
+echo "[Step 4] Generating Layout and Visuals..."
+
+# Create seqids file (defines which scaffolds/chromosomes to display)
+rm -f seqids
+for genome in "${GENOMES[@]}"; do
+    cut -f1 "${genome}.bed" | uniq | head -n 1000 | paste -sd, - >> seqids
+done
+
+# Create the layout file for the plot
+# Format: y-coord, x-start, x-end, rotation, color, label, vertical-align, bed-file
+cat <<EOF > layout
+# y, xstart, xend, rotation, color, label, va, bed
+.6,  .1, .9, 0, ${COLORS[0]}, T6085, top, T6085.bed
+.4,  .1, .9, 0, ${COLORS[1]}, T035,  top, T035.bed
+.2,  .1, .9, 0, ${COLORS[2]}, A5MH,  top, A5MH.bed
+# edges (synteny links between tracks)
+e, 0, 1, T6085.T035.simple
+e, 1, 2, T035.A5MH.simple
+EOF
+
+# Render final PDF
+python -m jcvi.graphics.karyotype seqids layout -o synteny_karyotype.pdf
+
