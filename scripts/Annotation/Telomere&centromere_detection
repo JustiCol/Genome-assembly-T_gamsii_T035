@@ -1,0 +1,286 @@
+#!/bin/bash
+
+###############################################################################
+#####                            Slurm options                           ######
+###############################################################################
+
+#SBATCH --job-name=telomere_centromere_detect
+#SBATCH --cpus-per-task=10
+#SBATCH --mem=64G
+#SBATCH --output=/home/genouest/inra_umr1345/jucolou/Genomic/Reports/%j-%x.out
+
+###############################################################################
+
+# Initialisation Conda
+source /local/miniconda3/etc/profile.d/conda.sh
+conda activate centrotelo
+
+ASSEMBLY="/scratch/jucolou/Genomic/T_gamsii/WGAlign_gamsii_atro/T_gamsii_T035_genome_corr.fasta"
+OUT="/scratch/jucolou/Genomic/T_gamsii/Telo_centro"
+
+mkdir -p $OUT
+
+########################################
+# 1. TIDK
+########################################
+echo "=== TIDK ==="
+
+# DB TIDK
+if [ ! -f ~/.local/share/tidk/tidk_database.csv ]; then
+    echo "No TIDK DB found -> building"
+    tidk build
+fi
+
+# explore
+if [ ! -f "$OUT/tidk_explore.tsv" ]; then
+    tidk explore -m 5 -x 12 -t 80 "$ASSEMBLY" > "$OUT/tidk_explore.tsv"
+fi
+
+# search
+if [ ! -d "$OUT/tidk_search" ]; then
+    mkdir -p $OUT/tidk_search
+    tidk search \
+      --string AAAAAAT \
+      --window 10000 \
+      --output telomere_AAAAAAT \
+      --dir $OUT/tidk_search \
+      "$ASSEMBLY"
+fi
+
+########################################
+# TELOMERES → BED + gieStain (version automatique du seuil)
+########################################
+
+########################################
+# TELOMERES → BED + gieStain
+########################################
+
+echo "=== Telomere BED generation ==="
+
+TELO_OUT="$OUT/telomeres_output"
+mkdir -p "$TELO_OUT"
+
+SEARCH_TSV="$OUT/tidk_search/telomere_AAAAAAT_telomeric_repeat_windows.tsv"
+RAW_BED="$TELO_OUT/telomeres_raw.bed"
+FINAL_BED="$TELO_OUT/telomeres.bed"
+GIE="$TELO_OUT/telomeres_gieStain.tsv"
+
+TEL_CUTOFF=10
+
+if [ ! -f "$FINAL_BED" ]; then
+    awk -F '\t' -v OFS="\t" -v T="$TEL_CUTOFF" '
+        NR>1 { if($3>=T || $4>=T) print $1, $2, $2+10000 }
+    ' "$SEARCH_TSV" > "$RAW_BED"
+
+    sort -k1,1 -k2,2n "$RAW_BED" | bedtools merge -i - > "$FINAL_BED"
+fi
+
+if [ ! -f "$GIE" ]; then
+    echo -e "chr\tstart\tend\tname\tgieStain" > "$GIE"
+    awk -v OFS="\t" '{print $1,$2,$3,"telomere","gneg"}' "$FINAL_BED" >> "$GIE"
+fi
+
+
+echo "=== Terminé ==="
+echo "BED final : $FINAL_BED"
+echo "GIEStain : $GIE"
+
+echo "=== Telomere BED + GIE done ==="
+
+
+########################################
+# 2. RepeatModeler
+########################################
+echo "=== RepeatModeler ==="
+
+# DB RepeatModeler
+if [ ! -f "$OUT/rm_db.nsq" ]; then
+    BuildDatabase -name $OUT/rm_db $ASSEMBLY
+fi
+
+# Run RepeatModeler si le répertoire RM_* correspondant n’existe pas
+if ! ls $OUT/RM_*/consensi.fa.classified >/dev/null 2>&1; then
+    RepeatModeler -threads 16 -database $OUT/rm_db -dir $OUT
+fi
+
+########################################
+# 3. RepeatMasker
+########################################
+echo "=== RepeatMasker ==="
+
+RM_LIB=$(ls $OUT/RM_*/consensi.fa.classified 2>/dev/null | head -n1)
+
+if [ ! -s "$RM_LIB" ]; then
+    echo "ERROR: RepeatModeler library not found"
+    exit 1
+fi
+
+mkdir -p $OUT/repeatmasker
+
+if ! ls $OUT/repeatmasker/*.out >/dev/null 2>&1; then
+    RepeatMasker -pa 16 \
+        -lib "$RM_LIB" \
+        -dir $OUT/repeatmasker \
+        "$ASSEMBLY"
+fi
+
+########################################
+# 4. TRF
+########################################
+echo "=== TRF ==="
+
+if [ ! -f "$OUT/trf.out" ]; then
+    trf $ASSEMBLY 2 7 7 80 10 50 500 -d -h > $OUT/trf.out
+fi
+
+if [ ! -f "$OUT/satellites.bed" ]; then
+    awk 'BEGIN{OFS="\t"} 
+        $0 ~ /^Sequence/ {seq=$2} 
+        $0 ~ /^[0-9]/ {print seq, $1-1, $2, "TRF"}' \
+        $OUT/trf.out > $OUT/satellites.bed
+fi
+
+########################################
+# 5. GC% + Repeat density
+########################################
+echo "=== GC% + repeats density ==="
+
+if [ ! -f "$ASSEMBLY.fai" ]; then
+    samtools faidx $ASSEMBLY
+fi
+
+if [ ! -f "$OUT/windows_10kb.bed" ]; then
+    bedtools makewindows -g $ASSEMBLY.fai -w 10000 > $OUT/windows_10kb.bed
+fi
+
+if [ ! -f "$OUT/gc.tsv" ]; then
+    bedtools nuc -fi $ASSEMBLY -bed $OUT/windows_10kb.bed > $OUT/gc.tsv
+fi
+
+# Convert RepeatMasker .out → .out.bed
+if ! ls $OUT/repeatmasker/*.out.bed >/dev/null 2>&1; then
+    for f in $OUT/repeatmasker/*.out; do
+        awk 'NR>3 {print $5"\t"$6"\t"$7"\t"$10}' $f > ${f}.bed
+    done
+fi
+
+if [ ! -f "$OUT/repeat_cov.tsv" ]; then
+    bedtools coverage \
+        -a $OUT/windows_10kb.bed \
+        -b $OUT/repeatmasker/*.out.bed \
+        > $OUT/repeat_cov.tsv
+fi
+
+echo "=== Gene density ==="
+
+GFF="/scratch/jucolou/Genomic/Structural_annotation/Trichoderma_gamsii/scaffolds_t35_atro/T35v3_helixer.gff"   # mets ton chemin
+GENES_BED="$OUT/genes.bed"
+
+# extraction simple : lignes "gene"
+if [ ! -f "$GENES_BED" ]; then
+    awk -F'\t' '($3=="gene"){print $1"\t"$4-1"\t"$5}' "$GFF" \
+        | sort -k1,1 -k2,2n > "$GENES_BED"
+fi
+
+GENE_COV="$OUT/gene_cov.tsv"
+
+if [ ! -f "$GENE_COV" ]; then
+    bedtools coverage \
+        -a $OUT/windows_10kb.bed \
+        -b $GENES_BED \
+        > "$GENE_COV"
+fi
+
+LOWGENE="$OUT/centro_from_genes.bed"
+
+if [ ! -f "$LOWGENE" ]; then
+    awk -v OFS="\t" '
+        {
+            geneFrac = $NF
+        }
+        (geneFrac < 0.03) {
+            print $1,$2,$3
+        }
+    ' "$GENE_COV" \
+    | bedtools merge \
+    > "$LOWGENE"
+fi
+
+
+########################################
+# 6. Jellyfish
+########################################
+echo "=== Jellyfish ==="
+
+if [ ! -f "$OUT/jf21.jf" ]; then
+    jellyfish count -m 21 -s 500M -t 16 $ASSEMBLY -o $OUT/jf21.jf
+fi
+
+if [ ! -f "$OUT/kmer21_counts.txt" ]; then
+    jellyfish dump -c $OUT/jf21.jf > $OUT/kmer21_counts.txt
+fi
+
+########################################
+# 7. Centromere prediction
+########################################
+echo "=== Centromere prediction ==="
+
+# repeats.bed fusionné
+if [ ! -f "$OUT/repeats.bed" ]; then
+    cat $OUT/repeatmasker/*.out.bed | sort -k1,1 -k2,2n > $OUT/repeats.bed
+fi
+
+# satellites.bed existe déjà
+
+# 7A
+if [ ! -f "$OUT/centro_from_repeats.bed" ]; then
+    awk '($3-$2)>=5000' $OUT/repeats.bed \
+        | bedtools merge \
+        > $OUT/centro_from_repeats.bed
+fi
+
+# 7B
+if [ ! -f "$OUT/centro_from_satellites.bed" ]; then
+    bedtools merge -i $OUT/satellites.bed \
+        > $OUT/centro_from_satellites.bed
+fi
+
+# 7C
+if [ ! -f "$OUT/centro_from_windows.bed" ]; then
+    paste $OUT/gc.tsv $OUT/repeat_cov.tsv \
+        | awk -v OFS="\t" '
+            {gc=$5; rep=$NF}
+            (gc < 0.40 && rep > 0.30) {
+                print $1,$2,$3,"lowGC_highREP";
+            }
+        ' \
+        | bedtools merge \
+        > $OUT/centro_from_windows.bed
+fi
+
+# 7D fusion finale
+if [ ! -f "$OUT/centromere_candidates.bed" ]; then
+    cat $OUT/centro_from_repeats.bed \
+        $OUT/centro_from_satellites.bed \
+        $OUT/centro_from_genes.bed \
+        $OUT/centro_from_windows.bed \
+        | sort -k1,1 -k2,2n \
+        | bedtools merge \
+        > $OUT/centromere_candidates.bed
+fi
+
+########################################
+# 7E. CENTROMÈRES → gieStain
+########################################
+echo "=== Centromere gieStain ==="
+
+CENTRO_GIE="$OUT/centromeres_gieStain.tsv"
+
+if [ ! -f "$CENTRO_GIE" ]; then
+    echo -e "chr\tstart\tend\tname\tgieStain" > "$CENTRO_GIE"
+    awk -v OFS="\t" '{print $1, $2, $3, "centromere", "acen"}' \
+        $OUT/centromere_candidates.bed >> "$CENTRO_GIE"
+fi
+
+echo "=== DONE ==="
+
