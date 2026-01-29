@@ -41,10 +41,14 @@ All scripts used in the study, organized by analysis type.
 #### Annotation/
 - "EDTA": SLURM script to detect transposable elements. Outputs summarized in Supplementary Table S4 ("Supplementary_tables.xlsx").
 - "GFFread.txt": SLURM script to extract CDS, transcript, and protein files from the genome and its GFF annotation.
+- "Telomere&centromere_detection.txt": SLURM script use to cross several tools in order to predict the location of telomeric and centromeric regions represented in Figure 6A.
 
 #### Genome_assembly/
 - "Genome_assembly_contigs.txt": SLURM script to assemble T035 genome de novo using sequencing reads from BioProject PRJNA1327094.
 - "Contigs_to_scaffolds_Ragtag": SLURM script to scaffold contigs using the *T. atroviride* reference genome (GCF_020647795.1). The resulting assembly has been submitted to the same BioProject (PRJNA1327094) but is not yet publicly available (as of 07/10/2025).
+
+#### Genome_comparison/
+- "Synteny.txt": SLURM script to perform a synteny analysis using JCVI. It was used to obtain the Figure 6B as well as the Supplementary Figure S6.
 
 #### In_vitro_tests/
 - "Antibiosis_script": Script to generate Figure 4B’s boxplot from "test.xlsx".
